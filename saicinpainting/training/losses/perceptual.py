@@ -6,7 +6,6 @@ import torchvision
 from models.ade20k import ModelBuilder
 from saicinpainting.utils import check_and_warn_input_range
 
-
 IMAGENET_MEAN = torch.FloatTensor([0.485, 0.456, 0.406])[None, :, None, None]
 IMAGENET_STD = torch.FloatTensor([0.229, 0.224, 0.225])[None, :, None, None]
 
@@ -89,6 +88,7 @@ class ResNetPL(nn.Module):
     def __init__(self, weight=1,
                  weights_path=None, arch_encoder='resnet50dilated', segmentation=True):
         super().__init__()
+        # TODO: 这里会报错，因为 resnet50dilated 无法加载预训练模型
         self.impl = ModelBuilder.get_encoder(weights_path=weights_path,
                                              arch_encoder=arch_encoder,
                                              arch_decoder='ppm_deepsup',

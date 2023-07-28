@@ -18,6 +18,8 @@ from saicinpainting.evaluation.data import InpaintingDataset as InpaintingEvalua
     OurInpaintingDataset as OurInpaintingEvaluationDataset, ceil_modulo, InpaintingEvalOnlineDataset
 from saicinpainting.training.data.aug import IAAAffine2, IAAPerspective2
 from saicinpainting.training.data.masks import get_mask_generator
+from copy import deepcopy
+from saicinpainting.img_util import tensor2img
 
 LOGGER = logging.getLogger(__name__)
 
@@ -43,6 +45,84 @@ class InpaintingTrainDataset(Dataset):
         self.iter_i += 1
         return dict(image=img,
                     mask=mask)
+
+
+class InpaintingLogoTrainDataset(Dataset):
+    """
+
+    """
+
+    def __init__(self, indir, mask_generator, transform):
+        self.in_files = list(glob.glob(os.path.join(indir, '**', '*.jpg'), recursive=True))
+        # TODO: 测试用，路径先 hard-code
+        indir_logo = "/Users/zihua.zeng/Dataset/logo_watermark_ds"
+        logo_regex = ["%s/logo-627/**/**/*.png" % indir_logo,
+                      "%s/Logo-2K+/**/**/*.jpg" % indir_logo,
+                      "%s/Car-Logos-Dataset/*.png" % indir_logo]
+        self.logo_files = list(glob.glob(logo_regex[0], recursive=True)) \
+                          + list(glob.glob(logo_regex[1], recursive=True)) \
+                          + list(glob.glob(logo_regex[2], recursive=True))
+        self.mask_generator = mask_generator
+        self.transform = transform
+        self.transform_logo = A.Compose([])
+        self.iter_i = 0
+        LOGGER.info("Cur DS is LogoTrainDataset")
+
+    def __len__(self):
+        return len(self.in_files)
+
+    def __getitem__(self, item):
+        path = self.in_files[item]
+        # 随机采样一张 logo 图
+        random.shuffle(self.logo_files)
+        logo_path = random.sample(self.logo_files, 1)[0]
+        img_logo = cv2.imread(logo_path, cv2.IMREAD_UNCHANGED)
+
+        print(logo_path, img_logo.shape)
+
+        img = cv2.imread(path)
+        img = self.transform(image=img)['image']
+        img_dummy = deepcopy(img)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = np.transpose(img, (2, 0, 1))
+        mask = self.mask_generator(img, iter_i=self.iter_i)
+        self.iter_i += 1
+
+        img_dummy *= 255.
+        h, w, _ = img_dummy.shape
+        img_logo = cv2.resize(img_logo, (w, h))
+        alpha = None
+
+        if len(img_logo.shape) == 2:
+            # 可能是灰度图
+            h, w = img_logo.shape
+            tmp = np.zeros((h, w, 3))
+            tmp[:, :, :] = img_logo[:, :, np.newaxis]
+            img_logo = tmp
+
+        if img_logo.shape[2] == 4:
+            alpha = img_logo[:, :, 3] / 255.0
+            img_logo = img_logo[:, :, :3]
+
+        cur_rect = self.mask_generator.rect_infos
+        for x, y, width, height in cur_rect:
+            img_logo = cv2.resize(img_logo, (width, height))
+            if alpha is not None:
+                alpha = cv2.resize(alpha, (width, height))
+                alpha = np.expand_dims(alpha, axis=2)
+                img_crop = img_dummy[y:(y + height), x:(x + width), :]
+                union = img_logo * alpha + img_crop * (1 - alpha)
+                img_dummy[y:(y + height), x:(x + width), :] = union
+            else:
+                img_dummy[y:(y + height), x:(x + width), :] = img_logo
+
+        # 对最后处理完的图片做 bgr2rgb，然后在归一化 0-1
+        img_dummy = cv2.cvtColor(img_dummy, cv2.COLOR_BGR2RGB)
+        img_dummy = img_dummy / 255.0
+        img_dummy = np.transpose(img_dummy, (2, 0, 1))
+        return dict(image=img,
+                    mask=mask,
+                    image_logo=img_dummy)
 
 
 class InpaintingTrainWebDataset(IterableDataset):
@@ -82,7 +162,7 @@ class ImgSegmentationDataset(Dataset):
         img = self.transform(image=img)['image']
         img = np.transpose(img, (2, 0, 1))
         mask = self.mask_generator(img)
-        segm, segm_classes= self.load_semantic_segm(path)
+        segm, segm_classes = self.load_semantic_segm(path)
         result = dict(image=img,
                       mask=mask,
                       segm=segm,
@@ -93,8 +173,8 @@ class ImgSegmentationDataset(Dataset):
         segm_path = img_path.replace(self.indir, self.segm_indir).replace(".jpg", ".png")
         mask = cv2.imread(segm_path, cv2.IMREAD_GRAYSCALE)
         mask = cv2.resize(mask, (self.out_size, self.out_size))
-        tensor = torch.from_numpy(np.clip(mask.astype(int)-1, 0, None))
-        ohe = F.one_hot(tensor.long(), num_classes=self.semantic_seg_n_classes) # w x h x n_classes
+        tensor = torch.from_numpy(np.clip(mask.astype(int) - 1, 0, None))
+        ohe = F.one_hot(tensor.long(), num_classes=self.semantic_seg_n_classes)  # w x h x n_classes
         return ohe.permute(2, 0, 1).float(), tensor.unsqueeze(0)
 
 
@@ -203,7 +283,8 @@ def get_transforms(transform_variant, out_size):
     return transform
 
 
-def make_default_train_dataloader(indir, kind='default', out_size=512, mask_gen_kwargs=None, transform_variant='default',
+def make_default_train_dataloader(indir, kind='default', out_size=512, mask_gen_kwargs=None,
+                                  transform_variant='default',
                                   mask_generator_kind="mixed", dataloader_kwargs=None, ddp_kwargs=None, **kwargs):
     LOGGER.info(f'Make train dataloader {kind} from {indir}. Using mask generator={mask_generator_kind}')
 
@@ -226,6 +307,11 @@ def make_default_train_dataloader(indir, kind='default', out_size=512, mask_gen_
                                          transform=transform,
                                          out_size=out_size,
                                          **kwargs)
+    elif kind == "default_logo":
+        dataset = InpaintingLogoTrainDataset(indir=indir,
+                                             mask_generator=mask_generator,
+                                             transform=transform,
+                                             **kwargs)
     else:
         raise ValueError(f'Unknown train dataset kind {kind}')
 
@@ -249,7 +335,8 @@ def make_default_train_dataloader(indir, kind='default', out_size=512, mask_gen_
 def make_default_val_dataset(indir, kind='default', out_size=512, transform_variant='default', **kwargs):
     if OmegaConf.is_list(indir) or isinstance(indir, (tuple, list)):
         return ConcatDataset([
-            make_default_val_dataset(idir, kind=kind, out_size=out_size, transform_variant=transform_variant, **kwargs) for idir in indir 
+            make_default_val_dataset(idir, kind=kind, out_size=out_size, transform_variant=transform_variant, **kwargs)
+            for idir in indir
         ])
 
     LOGGER.info(f'Make val dataloader {kind} from {indir}')
@@ -289,7 +376,7 @@ def make_default_val_dataloader(*args, dataloader_kwargs=None, **kwargs):
     return dataloader
 
 
-def make_constant_area_crop_params(img_height, img_width, min_size=128, max_size=512, area=256*256, round_to_mod=16):
+def make_constant_area_crop_params(img_height, img_width, min_size=128, max_size=512, area=256 * 256, round_to_mod=16):
     min_size = min(img_height, img_width, min_size)
     max_size = min(img_height, img_width, max_size)
     if random.random() < 0.5:

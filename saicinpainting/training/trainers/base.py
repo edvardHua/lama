@@ -47,7 +47,8 @@ def make_multiscale_noise(base_tensor, scales=6, scale_mode='bilinear'):
     align_corners = False if scale_mode in ('bilinear', 'bicubic') else None
     for _ in range(scales):
         cur_sample = torch.randn(batch_size, 1, cur_height, cur_width, device=base_tensor.device)
-        cur_sample_scaled = F.interpolate(cur_sample, size=(height, width), mode=scale_mode, align_corners=align_corners)
+        cur_sample_scaled = F.interpolate(cur_sample, size=(height, width), mode=scale_mode,
+                                          align_corners=align_corners)
         result.append(cur_sample_scaled)
         cur_height //= 2
         cur_width //= 2
@@ -55,7 +56,7 @@ def make_multiscale_noise(base_tensor, scales=6, scale_mode='bilinear'):
 
 
 class BaseInpaintingTrainingModule(ptl.LightningModule):
-    def __init__(self, config, use_ddp, *args,  predict_only=False, visualize_each_iters=100,
+    def __init__(self, config, use_ddp, *args, predict_only=False, visualize_each_iters=100,
                  average_generator=False, generator_avg_beta=0.999, average_generator_start_step=30000,
                  average_generator_period=10, store_discr_outputs_for_vis=False,
                  **kwargs):
@@ -102,7 +103,7 @@ class BaseInpaintingTrainingModule(ptl.LightningModule):
 
             if self.config.losses.get("mse", {"weight": 0})['weight'] > 0:
                 self.loss_mse = nn.MSELoss(reduction='none')
-            
+
             if self.config.losses.perceptual.weight > 0:
                 self.loss_pl = PerceptualLoss()
 
@@ -260,7 +261,8 @@ class BaseInpaintingTrainingModule(ptl.LightningModule):
         elif mode == 'test':
             result['test_evaluator_state'] = self.test_evaluator.process_batch(batch)
         elif mode == 'extra_val':
-            result[f'extra_val_{extra_val_key}_evaluator_state'] = self.extra_evaluators[extra_val_key].process_batch(batch)
+            result[f'extra_val_{extra_val_key}_evaluator_state'] = self.extra_evaluators[extra_val_key].process_batch(
+                batch)
 
         return result
 

@@ -1,14 +1,15 @@
 # @package _group_
 
-batch_size: 2
+batch_size: 10
 val_batch_size: 2
 num_workers: 3
 
 train:
   indir: ${location.data_root_dir}/train
+  kind: default_logo
   out_size: 256
-  mask_gen_kwargs:  # probabilities do not need to sum to 1, they are re-normalized in mask generator
-    irregular_proba: 1
+  mask_gen_kwargs: # probabilities do not need to sum to 1, they are re-normalized in mask generator
+    irregular_proba: 0
     irregular_kwargs:
       max_angle: 4
       max_len: 200
@@ -21,7 +22,7 @@ train:
       margin: 10
       bbox_min_size: 30
       bbox_max_size: 150
-      max_times: 4
+      max_times: 1
       min_times: 1
 
     segm_proba: 0

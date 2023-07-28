@@ -74,16 +74,19 @@ def make_random_rectangle_mask(shape, margin=10, bbox_min_size=30, bbox_max_size
     mask = np.zeros((height, width), np.float32)
     bbox_max_size = min(bbox_max_size, height - margin * 2, width - margin * 2)
     times = np.random.randint(min_times, max_times + 1)
+    rect_infos = []
     for i in range(times):
         box_width = np.random.randint(bbox_min_size, bbox_max_size)
         box_height = np.random.randint(bbox_min_size, bbox_max_size)
         start_x = np.random.randint(margin, width - margin - box_width + 1)
         start_y = np.random.randint(margin, height - margin - box_height + 1)
         mask[start_y:start_y + box_height, start_x:start_x + box_width] = 1
-    return mask[None, ...]
+        rect_infos.append((start_x, start_y, box_width, box_height))
+    return mask[None, ...], rect_infos
 
 
 class RandomRectangleMaskGenerator:
+
     def __init__(self, margin=10, bbox_min_size=30, bbox_max_size=100, min_times=0, max_times=3, ramp_kwargs=None):
         self.margin = margin
         self.bbox_min_size = bbox_min_size
@@ -91,14 +94,18 @@ class RandomRectangleMaskGenerator:
         self.min_times = min_times
         self.max_times = max_times
         self.ramp = LinearRamp(**ramp_kwargs) if ramp_kwargs is not None else None
+        self.rect_infos = None
 
     def __call__(self, img, iter_i=None, raw_image=None):
         coef = self.ramp(iter_i) if (self.ramp is not None) and (iter_i is not None) else 1
         cur_bbox_max_size = int(self.bbox_min_size + 1 + (self.bbox_max_size - self.bbox_min_size) * coef)
         cur_max_times = int(self.min_times + (self.max_times - self.min_times) * coef)
-        return make_random_rectangle_mask(img.shape[1:], margin=self.margin, bbox_min_size=self.bbox_min_size,
-                                          bbox_max_size=cur_bbox_max_size, min_times=self.min_times,
-                                          max_times=cur_max_times)
+        # 这里修改了代码，保存了 rect 的 [xmin, ymin, width, height]
+        mask, self.rect_infos = make_random_rectangle_mask(img.shape[1:], margin=self.margin,
+                                                           bbox_min_size=self.bbox_min_size,
+                                                           bbox_max_size=cur_bbox_max_size, min_times=self.min_times,
+                                                           max_times=cur_max_times)
+        return mask
 
 
 class RandomSegmentationMaskGenerator:
@@ -147,7 +154,7 @@ class DumbAreaMaskGenerator:
     default_ratio = 0.225
 
     def __init__(self, is_training):
-        #Parameters:
+        # Parameters:
         #    is_training(bool): If true - random rectangular mask, if false - central square mask
         self.is_training = is_training
 
@@ -156,12 +163,12 @@ class DumbAreaMaskGenerator:
             lower_limit = math.sqrt(self.min_ratio)
             upper_limit = math.sqrt(self.max_ratio)
             mask_side = round((random.random() * (upper_limit - lower_limit) + lower_limit) * dimension)
-            u = random.randint(0, dimension-mask_side-1)
-            v = u+mask_side 
+            u = random.randint(0, dimension - mask_side - 1)
+            v = u + mask_side
         else:
             margin = (math.sqrt(self.default_ratio) / 2) * dimension
-            u = round(dimension/2 - margin)
-            v = round(dimension/2 + margin)
+            u = round(dimension / 2 - margin)
+            v = round(dimension / 2 + margin)
         return u, v
 
     def __call__(self, img, iter_i=None, raw_image=None):
@@ -174,8 +181,9 @@ class DumbAreaMaskGenerator:
 
 
 class OutpaintingMaskGenerator:
-    def __init__(self, min_padding_percent:float=0.04, max_padding_percent:int=0.25, left_padding_prob:float=0.5, top_padding_prob:float=0.5, 
-                 right_padding_prob:float=0.5, bottom_padding_prob:float=0.5, is_fixed_randomness:bool=False):
+    def __init__(self, min_padding_percent: float = 0.04, max_padding_percent: int = 0.25,
+                 left_padding_prob: float = 0.5, top_padding_prob: float = 0.5,
+                 right_padding_prob: float = 0.5, bottom_padding_prob: float = 0.5, is_fixed_randomness: bool = False):
         """
         is_fixed_randomness - get identical paddings for the same image if args are the same
         """
@@ -186,27 +194,30 @@ class OutpaintingMaskGenerator:
 
         assert self.min_padding_percent <= self.max_padding_percent
         assert self.max_padding_percent > 0
-        assert len([x for x in [self.min_padding_percent, self.max_padding_percent] if (x>=0 and x<=1)]) == 2, f"Padding percentage should be in [0,1]"
+        assert len([x for x in [self.min_padding_percent, self.max_padding_percent] if
+                    (x >= 0 and x <= 1)]) == 2, f"Padding percentage should be in [0,1]"
         assert sum(self.probs) > 0, f"At least one of the padding probs should be greater than 0 - {self.probs}"
-        assert len([x for x in self.probs if (x >= 0) and (x <= 1)]) == 4, f"At least one of padding probs is not in [0,1] - {self.probs}"
+        assert len([x for x in self.probs if
+                    (x >= 0) and (x <= 1)]) == 4, f"At least one of padding probs is not in [0,1] - {self.probs}"
         if len([x for x in self.probs if x > 0]) == 1:
-            LOGGER.warning(f"Only one padding prob is greater than zero - {self.probs}. That means that the outpainting masks will be always on the same side")
+            LOGGER.warning(
+                f"Only one padding prob is greater than zero - {self.probs}. That means that the outpainting masks will be always on the same side")
 
     def apply_padding(self, mask, coord):
-        mask[int(coord[0][0]*self.img_h):int(coord[1][0]*self.img_h),   
-             int(coord[0][1]*self.img_w):int(coord[1][1]*self.img_w)] = 1
+        mask[int(coord[0][0] * self.img_h):int(coord[1][0] * self.img_h),
+        int(coord[0][1] * self.img_w):int(coord[1][1] * self.img_w)] = 1
         return mask
 
     def get_padding(self, size):
-        n1 = int(self.min_padding_percent*size)
-        n2 = int(self.max_padding_percent*size)
+        n1 = int(self.min_padding_percent * size)
+        n2 = int(self.max_padding_percent * size)
         return self.rnd.randint(n1, n2) / size
 
     @staticmethod
     def _img2rs(img):
         arr = np.ascontiguousarray(img.astype(np.uint8))
         str_hash = hashlib.sha1(arr).hexdigest()
-        res = hash(str_hash)%(2**32)
+        res = hash(str_hash) % (2 ** 32)
         return res
 
     def __call__(self, img, iter_i=None, raw_image=None):
@@ -222,21 +233,21 @@ class OutpaintingMaskGenerator:
             self.rnd = np.random
 
         coords = [[
-                   (0,0), 
-                   (1,self.get_padding(size=self.img_h))
-                  ],
-                  [
-                    (0,0),
-                    (self.get_padding(size=self.img_w),1)
-                  ],
-                  [
-                    (0,1-self.get_padding(size=self.img_h)),
-                    (1,1)
-                  ],    
-                  [
-                    (1-self.get_padding(size=self.img_w),0),
-                    (1,1)
-                  ]]
+            (0, 0),
+            (1, self.get_padding(size=self.img_h))
+        ],
+            [
+                (0, 0),
+                (self.get_padding(size=self.img_w), 1)
+            ],
+            [
+                (0, 1 - self.get_padding(size=self.img_h)),
+                (1, 1)
+            ],
+            [
+                (1 - self.get_padding(size=self.img_w), 0),
+                (1, 1)
+            ]]
 
         for pp, coord in zip(self.probs, coords):
             if self.rnd.random() < pp:
@@ -244,21 +255,23 @@ class OutpaintingMaskGenerator:
                 mask = self.apply_padding(mask=mask, coord=coord)
 
         if not at_least_one_mask_applied:
-            idx = self.rnd.choice(range(len(coords)), p=np.array(self.probs)/sum(self.probs))
+            idx = self.rnd.choice(range(len(coords)), p=np.array(self.probs) / sum(self.probs))
             mask = self.apply_padding(mask=mask, coord=coords[idx])
         return mask[None, ...]
 
 
 class MixedMaskGenerator:
-    def __init__(self, irregular_proba=1/3, irregular_kwargs=None,
-                 box_proba=1/3, box_kwargs=None,
-                 segm_proba=1/3, segm_kwargs=None,
+    def __init__(self, irregular_proba=1 / 3, irregular_kwargs=None,
+                 box_proba=1 / 3, box_kwargs=None,
+                 segm_proba=1 / 3, segm_kwargs=None,
                  squares_proba=0, squares_kwargs=None,
                  superres_proba=0, superres_kwargs=None,
                  outpainting_proba=0, outpainting_kwargs=None,
                  invert_proba=0):
         self.probas = []
         self.gens = []
+
+        self.rect_infos = []
 
         if irregular_proba > 0:
             self.probas.append(irregular_proba)
@@ -309,9 +322,14 @@ class MixedMaskGenerator:
     def __call__(self, img, iter_i=None, raw_image=None):
         kind = np.random.choice(len(self.probas), p=self.probas)
         gen = self.gens[kind]
+
         result = gen(img, iter_i=iter_i, raw_image=raw_image)
-        if self.invert_proba > 0 and random.random() < self.invert_proba:
-            result = 1 - result
+
+        if isinstance(gen, RandomRectangleMaskGenerator):
+            self.rect_infos = gen.rect_infos
+
+            if self.invert_proba > 0 and random.random() < self.invert_proba:
+                result = 1 - result
         return result
 
 

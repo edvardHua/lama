@@ -41,6 +41,9 @@ def pad_tensor_to_modulo(img, mod):
 
 
 def scale_image(img, factor, interpolation=cv2.INTER_AREA):
+    """
+    对图片进行等比例缩放
+    """
     if img.shape[0] == 1:
         img = img[0]
     else:
@@ -79,14 +82,17 @@ class InpaintingDataset(Dataset):
             result['unpad_to_size'] = result['image'].shape[1:]
             result['image'] = pad_img_to_modulo(result['image'], self.pad_out_to_modulo)
             result['mask'] = pad_img_to_modulo(result['mask'], self.pad_out_to_modulo)
-
         return result
+
 
 class OurInpaintingDataset(Dataset):
     def __init__(self, datadir, img_suffix='.jpg', pad_out_to_modulo=None, scale_factor=None):
         self.datadir = datadir
-        self.mask_filenames = sorted(list(glob.glob(os.path.join(self.datadir, 'mask', '**', '*mask*.png'), recursive=True)))
-        self.img_filenames = [os.path.join(self.datadir, 'img', os.path.basename(fname.rsplit('-', 1)[0].rsplit('_', 1)[0]) + '.png') for fname in self.mask_filenames]
+        self.mask_filenames = sorted(
+            list(glob.glob(os.path.join(self.datadir, 'mask', '**', '*mask*.png'), recursive=True)))
+        self.img_filenames = [
+            os.path.join(self.datadir, 'img', os.path.basename(fname.rsplit('-', 1)[0].rsplit('_', 1)[0]) + '.png') for
+            fname in self.mask_filenames]
         self.pad_out_to_modulo = pad_out_to_modulo
         self.scale_factor = scale_factor
 
@@ -107,6 +113,7 @@ class OurInpaintingDataset(Dataset):
 
         return result
 
+
 class PrecomputedInpaintingResultsDataset(InpaintingDataset):
     def __init__(self, datadir, predictdir, inpainted_suffix='_inpainted.jpg', **kwargs):
         super().__init__(datadir, **kwargs)
@@ -123,14 +130,16 @@ class PrecomputedInpaintingResultsDataset(InpaintingDataset):
             result['inpainted'] = pad_img_to_modulo(result['inpainted'], self.pad_out_to_modulo)
         return result
 
+
 class OurPrecomputedInpaintingResultsDataset(OurInpaintingDataset):
     def __init__(self, datadir, predictdir, inpainted_suffix="png", **kwargs):
         super().__init__(datadir, **kwargs)
         if not datadir.endswith('/'):
             datadir += '/'
         self.predictdir = predictdir
-        self.pred_filenames = [os.path.join(predictdir, os.path.basename(os.path.splitext(fname)[0]) + f'_inpainted.{inpainted_suffix}')
-                               for fname in self.mask_filenames]
+        self.pred_filenames = [
+            os.path.join(predictdir, os.path.basename(os.path.splitext(fname)[0]) + f'_inpainted.{inpainted_suffix}')
+            for fname in self.mask_filenames]
         # self.pred_filenames = [os.path.join(predictdir, os.path.splitext(fname[len(datadir):])[0] + inpainted_suffix)
         #                        for fname in self.mask_filenames]
 
@@ -142,11 +151,12 @@ class OurPrecomputedInpaintingResultsDataset(OurInpaintingDataset):
             result['inpainted'] = pad_img_to_modulo(result['inpainted'], self.pad_out_to_modulo)
         return result
 
+
 class InpaintingEvalOnlineDataset(Dataset):
-    def __init__(self, indir, mask_generator, img_suffix='.jpg', pad_out_to_modulo=None, scale_factor=None,  **kwargs):
+    def __init__(self, indir, mask_generator, img_suffix='.jpg', pad_out_to_modulo=None, scale_factor=None, **kwargs):
         self.indir = indir
         self.mask_generator = mask_generator
-        self.img_filenames = sorted(list(glob.glob(os.path.join(self.indir, '**', f'*{img_suffix}' ), recursive=True)))
+        self.img_filenames = sorted(list(glob.glob(os.path.join(self.indir, '**', f'*{img_suffix}'), recursive=True)))
         self.pad_out_to_modulo = pad_out_to_modulo
         self.scale_factor = scale_factor
 
