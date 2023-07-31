@@ -5,6 +5,9 @@ import os
 import sys
 import traceback
 
+sys.path.append(os.getcwd())
+sys.path.append(os.path.join(os.getcwd(), "saicinpainting"))
+
 os.environ['OMP_NUM_THREADS'] = '1'
 os.environ['OPENBLAS_NUM_THREADS'] = '1'
 os.environ['MKL_NUM_THREADS'] = '1'

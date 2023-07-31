@@ -89,6 +89,9 @@ class ResNetPL(nn.Module):
                  weights_path=None, arch_encoder='resnet50dilated', segmentation=True):
         super().__init__()
         # TODO: 这里会报错，因为 resnet50dilated 无法加载预训练模型
+        # 暂时先用 resnet50 + segmentation = False 代替
+        arch_encoder = "resnet50"
+        segmentation = False
         self.impl = ModelBuilder.get_encoder(weights_path=weights_path,
                                              arch_encoder=arch_encoder,
                                              arch_decoder='ppm_deepsup',
